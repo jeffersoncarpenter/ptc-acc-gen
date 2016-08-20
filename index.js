@@ -2,6 +2,7 @@
 var Nightmare = require('nightmare');
 var nicknames = require('./nicknames.json');
 var fs = require('fs');
+var solver = require('./2captcha');
 
 // Settings
 var debug = false;
@@ -20,7 +21,7 @@ var outputFormat = "ptc,%NICK%,%PASS%,%LAT%,%LON%,%UN%\r\n"; // Format used to s
 var screenshotFolder = "output/screenshots/";
 
 var country = "US"; // Country code (e.g. BE, FR, US, CA)
-var dob = "1990-01-01"; // Date of birth, yyyy-mm-dd
+var dob = "1991-01-01"; // Date of birth, yyyy-mm-dd
 var username = "CHANGEME"; // User- & display name. Make sure any "(username + number)@domain.com" is 100% unique, and is 6 characters minimum, but under 14 characters after the numbers are applied.
 var password = "CHANGEME"; // Static password for all accounts. Ignored if useRandomPassword is true.
 var email_user = "username"; // If your email is email@domain.com, enter "email"
@@ -37,6 +38,7 @@ var nightmare_opts = {
     gotoTimeout: 5000,
     loadTimeout: 5000
 };
+solver.options.key = 'ea1de4eb81487b51b5f8236c7139c79c';
 // Prints nice little message
 console.log("ptc-acc-gen v1.4.0 by Sébastien Vercammen and Frost The Fox (and Github contribs)")
 
@@ -129,7 +131,6 @@ function fillFirstPage(ctr) {
     if(debug) {
         console.log("[DEBUG] Fill first page #" + ctr);
     }
-    
     nightmare.evaluate(function(data) {
             document.getElementById("id_dob").value = data.dob;
             
@@ -205,48 +206,63 @@ function fillSignupPage(ctr) {
     
     // Fill it all in
     nightmare.evaluate(function(data) {
-            document.getElementById("id_password").value = data.pass;
-            document.getElementById("id_confirm_password").value = data.pass;
-            document.getElementById("id_email").value = data.email_user + "+" + data.nick + "@" + data.email_domain;
-            document.getElementById("id_confirm_email").value = data.email_user + "+" + data.nick + "@" + data.email_domain;
-            document.getElementById("id_screen_name").value = data.nick;
-            document.getElementById("id_username").value = data.nick;
-        }, { "pass": _pass, "nick": _nick, "email_user": email_user, "email_domain": email_domain })
-        .check("#id_terms")
-        .wait(function() {
-            return (document.getElementById("signup-signin") !== null || document.getElementById("btn-reset") !== null || document.body.textContent.indexOf("That username already exists") > -1);
-        })
-        .evaluate(function() {
-            return (document.body.textContent.indexOf("Hello! Thank you for creating an account!") > -1);
-        })
-        .then(function(success) {
-            if(success) {
-                // Log it in the file of used nicknames
-                var content = outputFormat.replace('%NICK%', _nick).replace('%PASS%', _pass).replace('%LAT%', lat).replace('%LON%', lon).replace('%UN%', _nick);
-                fs.appendFile(outputFile, content, function(err) {
-                    //
-                });
-            }
-            
-            if((success && screenshotResult) || screenshotOnFailure) {
-                // Screenshot
-                nightmare.screenshot(screenshotFolder + _nick + ".png");
-            }
-            
-            // Next one, or stop
-            if(ctr < end) {
-                return function() { createAccount(ctr + 1); };
-            } else {
-                return nightmare.end();
-            }
-        }).then(function(next) {
-            return next();
-        }).catch(handleError)
-        .then(function(err) {
-            if (typeof err !== "undefined") {
-                return handleSignupPage(ctr);
-            }
+		return {
+			key: document.getElementsByClassName('g-recaptcha')[0].attributes['data-sitekey'].value,
+			url: document.location.href,
+		};
+	}).then(function (opts) {
+		solver.solve(opts, function(err, grecaptcha_response) {
+			if (err) {
+				handleError(err);
+			}
+			nightmare.evaluate(function(data) {
+				document.getElementById("id_password").value = data.pass;
+				document.getElementById("id_confirm_password").value = data.pass;
+				document.getElementById("id_email").value = data.email_user + "+" + data.nick + "@" + data.email_domain;
+				document.getElementById("id_confirm_email").value = data.email_user + "+" + data.nick + "@" + data.email_domain;
+				document.getElementById("id_screen_name").value = data.nick;
+        		document.getElementById("id_username").value = data.nick;
+        		document.getElementById("g-recaptcha-response").value = data.grecaptcha_response;
+    		}, { "pass": _pass, "nick": _nick, "email_user": email_user, "email_domain": email_domain, "grecaptcha_response": grecaptcha_response })
+				.check("#id_terms")
+				.click("form[name='create-account'] [type=submit]")
+				.wait(function() {
+					return (document.getElementById("signup-signin") !== null || document.getElementById("btn-reset") !== null || document.body.textContent.indexOf("That username already exists") > -1);
+				})
+				.evaluate(function() {
+					return (document.body.textContent.indexOf("Hello! Thank you for creating an account!") > -1);
+				})
+				.then(function(success) {
+					if(success) {
+						// Log it in the file of used nicknames
+						var content = outputFormat.replace('%NICK%', _nick).replace('%PASS%', _pass).replace('%LAT%', lat).replace('%LON%', lon).replace('%UN%', _nick);
+						fs.appendFile(outputFile, content, function(err) {
+							//
+						});
+					}
+					
+					if((success && screenshotResult) || screenshotOnFailure) {
+						// Screenshot
+						nightmare.screenshot(screenshotFolder + _nick + ".png");
+					}
+					
+					// Next one, or stop
+					if(ctr < end) {
+						return function() { createAccount(ctr + 1); };
+					} else {
+						return nightmare.end();
+					}
+				}).then(function(next) {
+					return next();
+				}).catch(handleError)
+				.then(function(err) {
+					if (typeof err !== "undefined") {
+						return handleSignupPage(ctr);
+					}
+				});
         });
+	});
+
 }
 
 // Evaluations
