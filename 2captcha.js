@@ -41,12 +41,15 @@ module.exports = {
 					},
 				}, function (err, result) {
 					if (err) return cb(err);
-					if (result.body.indexOf('OK|') !== 0) {
+					if (result.body === 'CAPCHA_NOT_READY') {
 						return setTimeout(function () {
 							return pollNow();
 						}, defaultOptions.pollingInterval);
 					}
-					return cb(null, result.body.substring(3));
+					if (result.body.indexOf('OK|') === 0) {
+						return cb(null, result.body.substring(3));
+					}
+					return cb(result.body);
 				});
 			};
 			pollNow();
